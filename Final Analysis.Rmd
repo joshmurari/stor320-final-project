@@ -1,0 +1,246 @@
+---
+title: "Exploratory Data Analysis"
+author: "STOR 320.(01 OR 02) Group 9 (Ex: STOR 320.01 Group 12)"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: html_document
+---
+
+```{r setup, include=T}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+
+# Import Data Below
+library(readr)
+ks <- read_csv("~/UNC/STOR 455/Data/ks-projects-201801.csv")
+head(ks,10)
+str(ks)
+```
+
+
+```{r}
+##CLEANING DATA
+
+# Remove all observations with missing data
+ks <- na.omit(ks)
+
+# View summary statistics of goal
+summaryGoal =
+ summarize(ks,
+   count = n(),
+   avg_goal = mean(goal),
+   min=min(goal),
+   Q1 = quantile(goal, .25),
+   Q2 = quantile(goal, .5),
+   Q3 = quantile(goal, .75),
+   IQR = Q3 - Q1,
+   max = max(goal),
+   nLow = sum(goal < Q1 - 1.5*IQR),
+   nHigh = sum(goal > Q3 + 1.5*IQR)
+ ) %>%
+ arrange(avg_goal)
+summaryGoal
+
+# View summary statistics of pledged
+summaryPledged =
+ summarize(ks,
+   count = n(),
+   avg_pledged = mean(pledged),
+   min=min(pledged),
+   Q1 = quantile(pledged, .25),
+   Q2 = quantile(pledged, .5),
+   Q3 = quantile(pledged, .75),
+   IQR = Q3 - Q1,
+   max = max(pledged),
+   nLow = sum(pledged < Q1 - 1.5*IQR),
+   nHigh = sum(pledged > Q3 + 1.5*IQR)
+ ) %>%
+ arrange(avg_pledged)
+summaryPledged
+
+# View summary statistics of backers
+summaryBackers =
+ summarize(ks,
+   count = n(),
+   avg_backers = mean(backers),
+   min=min(backers),
+   Q1 = quantile(backers, .25),
+   Q2 = quantile(backers, .5),
+   Q3 = quantile(backers, .75),
+   IQR = Q3 - Q1,
+   max = max(backers),
+   nLow = sum(backers < Q1 - 1.5*IQR),
+   nHigh = sum(backers > Q3 + 1.5*IQR)
+ ) %>%
+ arrange(avg_backers)
+summaryBackers
+```
+
+Based on some of the rows in our dataset having extremely high goals and extremely high pledged numbers, we decided to remove these outliers to better scale our data and graphs. But we decided to not limit backers by IQR because there are many kickstarted campaigns that are above the IQR range and we do not necessairly consider these as outliers.
+
+```{r}
+# Remove outliers based on goal and pledged using IQR
+maxGoal <- quantile(ks$goal,0.75, na.rm=TRUE) + (IQR(ks$goal, na.rm=TRUE) * 1.5 )
+minGoal <- quantile(ks$goal,0.25, na.rm=TRUE) - (IQR(ks$goal, na.rm=TRUE) * 1.5 )
+maxPledged <- quantile(ks$pledged,0.75, na.rm=TRUE) + (IQR(ks$pledged, na.rm=TRUE) * 1.5 )
+minPledged <- quantile(ks$pledged,0.25, na.rm=TRUE) - (IQR(ks$pledged, na.rm=TRUE) * 1.5 )
+ks = filter(ks,goal<maxGoal&&goal>minGoal,pledged<maxPledged&&pledged>minPledged)
+
+# Remove all observations where the kickstarter was cancelled, suspended, is still live, or is the state is undefined
+ks <- ks %>%
+ filter(state == "successful" | state == "failed")
+
+# Create binary state variable
+stateFunction <- function(state) {
+  if(state=='successful'){
+    1
+  }else{
+    0
+  }
+}
+ks$stateBin=sapply(ks$state, stateFunction)
+
+# Create campaign period variable
+ks=mutate(ks,deadline=as.POSIXct(deadline),campaign_period=as.POSIXct(deadline)-(launched),campaign_period=round(as.numeric(campaign_period)/1440))
+```
+
+
+
+
+#Interpreter: JOSHUA MURARI
+
+###Q1: How long is the optimal campaign period?
+
+
+```{r}
+# Campaing period outliers
+summarycp =
+ summarize(ks,
+   count = n(),
+   avg_cp = mean(campaign_period),
+   min=min(campaign_period),
+   Q1 = quantile(campaign_period, .25),
+   Q2 = quantile(campaign_period, .5),
+   Q3 = quantile(campaign_period, .75),
+   IQR = Q3 - Q1,
+   max = max(campaign_period),
+   nLow = sum(campaign_period < Q1 - 1.5*IQR),
+   nHigh = sum(campaign_period > Q3 + 1.5*IQR)
+ ) %>%
+ arrange(avg_cp)
+summarycp
+
+#Take out outliers
+ks=filter(ks,campaign_period<365)
+
+
+```
+
+
+### New Questions Based Off Initial Investigation
+
+- Q1: Which variables of a kickstarter campaign most influence the total amount of money pledged?
+- Q2: Are factors that influence a campaign's success the same ones that influence the raw amount of money it raises? What common characteristics are seen in campaigns that exceed their campaign goal?
+- Q3: Do different industries have different optimal campaign lengths? Months? 
+- Q4: Does the inclusion of certain buzzwords affect the success of the campaign?
+
+### Investigation of Follow-up Questions
+
+Our group decided to investigate question 1 and question 4 in further detial.
+
+```{r}
+#Exporing Question 4
+#Buzzwords were taken from careerfoundry.com/en/blog/web-development/tech-buzzwords-to-learn/ 
+buzzwordFunc <- function(name) {
+  if(grepl("smart |quantum|blockchain| IOT | AI |analytics|cloud|cutting edge|premium|elite|breakthrough|big data", name)){
+    1
+  }else{
+    0
+  }
+}
+ks$buzzWord=sapply(ks$name, buzzwordFunc)
+
+#Creating a proportion success
+newKstech=sqldf('SELECT buzzWord,SUM(stateBin), count() as count
+FROM ks
+GROUP BY buzzWord')
+newKstech=mutate(newKstech,prop=`SUM(stateBin)`/count)
+newKstech=arrange(newKstech, desc(prop))
+head(newKstech)
+```
+
+```{r}
+library(Stat2Data)
+#Logistic model with just usd goal
+model1=model1=glm(stateBin~log(`usd_goal_real`),family=binomial,data=ks)
+summary(model1)
+B0 = summary(model1)$coef[1]
+B1 = summary(model1)$coef[2]
+
+#Logistic plot
+plot(jitter(stateBin,amount=0.1)~log(`usd_goal_real`), data=ks)
+curve(exp(B0+B1*x)/(1+exp(B0+B1*x)),add=TRUE, col="red")
+
+#Empirical logit plot
+emplogitplot1(stateBin~log(`usd_goal_real`),data=ks,ngroups=23)
+emplogitplot1(stateBin~I(log(`usd_goal_real`)^2),data=ks,ngroups=23)
+
+#Model with backers added
+model1.1=glm(stateBin~I(log(`usd_goal_real`)^2)+backers,family=binomial,data=ks)
+summary(model1.1)
+
+#Test main_category
+model1.2=glm(stateBin~I(log(`usd_goal_real`)^2)+backers+factor(`main_category`),family=binomial,data=ks)
+summary(model1.2)
+
+#Test currency
+model1.3=glm(stateBin~I(log(`usd_goal_real`)^2)+backers+`main_category`+currency,family=binomial,data=ks)
+summary(model1.3)
+
+#Test country
+model1.4=glm(stateBin~I(log(`usd_goal_real`)^2)+backers+`main_category`+country,family=binomial,data=ks)
+summary(model1.4)
+```
+
+```{r}
+#Drop in deviance test between model 1.1 an 1.2
+mod1.1resDev=235143
+mod1.2resDev=222588
+1-pchisq(mod1.1resDev-mod1.2resDev,1)
+
+#Chosen model
+logitmod=glm(stateBin~I(log(`usd_goal_real`)^2)+backers+factor(`main_category`),family=binomial,data=ks)
+```
+
+# Cross Vaildation
+```{r}
+library(caret)
+```
+
+
+
+#Summary
+
+
+From our initial questions, we discovered several interesting characteristics about our data set. From our initial questions, it is clear that Kickstarter campaign dealing with Games, Technology, and Design receive the highest number of backers. Not surprisingly, the more backers a project has, the more likely it is to succeed. It also appears that the length of the campaign period and the time of year when the project was launched both play a role in determining the success of a Kickstarter project.Projects with higher goals, have a lower chance of succeeding, which is expected. The country of origin for projects also plays a role in determining if the project is successful with most successes coming from the United States, Great Britain, Canada, and Australia. Since being founded in 2009, the amount of money pledged to Kickstarter campaigns steadily rose until 2016, which is when the amount seems to level off. However, data from more years to come will be needed to verify this. An interesting discovery from this initial research was the very low success rate of hip-hop music projects.  In this day and age, hip-hop music is a very popular form of music, especially among the generation that would be most likely to support crowdfunding campaigns like Kickstarters; however, the succeess rate for hip-hop music projects is quite low relative to the success rate of other genres of music. Overall, most of our initial findings from the data showed the expected correlations between variables without any surprises. Looking further into the questions regarding the optimal campaign period and the optimal time of year to start a project were helpful in coming up with the second list of questions for further analysis.
+
+We decided to test wether buzzwords were indeed effective when naming campaigns because the intuitive idea is that they would be, which is why many different companies decide to use them. We found a list of different tech and marketing buzz words online and then filtered our dataset to show the difference in the success rate between the campaigns that had buzzwords versus the campaigns that did not have buzzwords. According to our data, we had 316 campaigns that included buzzwords in their name and these campaigns had a success rate of 0.3892405. For the rest of the 331146 campaigns that did not have buzzwords, the success rate was 0.4038340. Both these proportions are very close to each other. This indicates that the inclusion of buzzwords in the campaign name did not have much of a difference in wether the campaign succeeded or not. 
+
+Then we decided to see what the best predictors were for a kickstarter campaign in order to predict it's success. It should be noted here that while some of these predictors are significant, wether or not the product/campaign goal is useful is, which one of the most important predictor of successes, is not included in this dataset because it is a very hard varible to quantify. With that being said, we then used the bestglm() function with all the useful quantative predictors to see which quantative variables are most effective in predicting success. The best model with a BIC level of 2557.494 included usd_goal_real, usd_pledged_real, and backers as the predictors. We decided to remove usd_pledged_real as a predictor after this because of its direct relation to the success of a campaign. Then we decided to take the log of usd_goal_real which helped greatly to normalize these goal values. Then we tested a logistical regression model with the success of the campaign being predicted by just the log(usd_goal_real) and plotted these values. Within this plot it can be seen that a relationship exists with higher goals correlating to a lower chance of a campaigns success. Then when looking at the empirical logit plot for this data, we can see that this plot is somewhat linear but more exponential in nature. This indicates that our model might not be great for logistic regression but we decided to continue on to improve our model. Squaring the term log(usd_goal_real) improved our empirical logstical model fit and including the variables of backers and main_category decreased our residual deviance by 207320 which is very significant. We then tested if adding main_category made a signficant difference using a drop in deviance test betweent the model without main_category as a predictor. This test concluded that including main_category did make our model significantly better. When expirmenting with country and currency we found that most of the categories within these variables were not significant so we did not include them in our model. 
+
+In totality, the best predictors that we found to predict the success of a kick starter campain were the log(usd_goal_real)^2,backers, and the main_category.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
